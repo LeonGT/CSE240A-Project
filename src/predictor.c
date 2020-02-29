@@ -6,6 +6,7 @@
 //  described in the README                               //
 //========================================================//
 #include <stdio.h>
+#include <math.h>
 #include "predictor.h"
 
 //
@@ -33,6 +34,11 @@ int verbose;
 //      Predictor Data Structures     //
 //------------------------------------//
 
+uint32_t global_history = 0;
+uint8_t gshare_pht[0x00002000]; // For Gshare Predictor
+uint32_t mask13 = 0x00001FFF;
+uint32_t mask2 = 0x00000003;
+
 //
 //TODO: Add your own Branch Predictor data structures here
 //
@@ -47,6 +53,9 @@ int verbose;
 void
 init_predictor()
 {
+  
+  //Gshare
+  
   //
   //TODO: Initialize Branch Predictor Data Structures
   //
@@ -62,16 +71,26 @@ make_prediction(uint32_t pc)
   //
   //TODO: Implement prediction scheme
   //
-
+  
   // Make a prediction based on the bpType
   switch (bpType) {
-    case STATIC:
+  case STATIC:
+    return TAKEN;
+  case GSHARE:
+      
+    if ((gshare_pht[(pc ^ global_history) & mask13] & mask2) == 1 ||
+	(gshare_pht[(pc ^ global_history) & mask13] & mask2) == 2){
+	
       return TAKEN;
-    case GSHARE:
-    case TOURNAMENT:
-    case CUSTOM:
-    default:
-      break;
+    }
+    else{
+      return NOTTAKEN;
+    }
+      
+  case TOURNAMENT:
+  case CUSTOM:
+  default:
+    break;
   }
 
   // If there is not a compatable bpType then return NOTTAKEN
@@ -85,7 +104,27 @@ make_prediction(uint32_t pc)
 void
 train_predictor(uint32_t pc, uint8_t outcome)
 {
+
+  //printf("Train: %d; Outcome %d\n", gshare_pht[(pc ^ global_history) & mask13], outcome);
+  //gshare
+  //if taken
+  if (outcome == 1){
+    if (gshare_pht[(pc ^ global_history) & mask13] != 2){
+      gshare_pht[(pc ^ global_history) & mask13] ++;
+    }
+  }
+
+  //if not taken
+  if (outcome == 0){
+    if (gshare_pht[(pc ^ global_history) & mask13] != 3){
+      gshare_pht[(pc ^ global_history) & mask13] --;
+    }
+  }
+
+
+  global_history = global_history << 1 + outcome;
   //
   //TODO: Implement Predictor training
   //
 }
+
