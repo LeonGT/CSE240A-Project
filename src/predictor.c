@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <stdbool.h>
+#include <inttypes.h>
 #include "predictor.h"
 
 //
@@ -35,7 +36,7 @@ int verbose;
 //      Predictor Data Structures     //
 //------------------------------------//
 
-uint32_t global_history = 0;
+uint32_t global_history;
 uint8_t* global_table;
 uint32_t* local_history_table;
 uint8_t* local_pattern_table;
@@ -43,7 +44,6 @@ uint8_t* choice_table;
 uint32_t global_mask; // extract the last ghistorybits
 uint32_t pc_mask; // extract the last pcIndexBits
 uint32_t local_mask; // extract the last lhistorybits
-uint32_t counter_mask = 0x00000003; //extract the last 2 bits
 
 
 
@@ -59,7 +59,9 @@ init_predictor()
 
   //initialize global table (common to all)
   global_mask = (1 << ghistoryBits) - 1; //set the last ghistoryBits to be 1s
-  global_table = calloc (1 << ghistoryBits, sizeof(uint8_t)); 
+  global_table = calloc (1 << ghistoryBits, sizeof(uint8_t));
+  global_history = 1;
+   
   int i;
   for (i = 0; i < (1 << ghistoryBits); ++i){
     global_table[i] = WN; //initialize all elements to Weakly Not Taken
@@ -108,15 +110,15 @@ init_predictor()
 uint8_t
 make_prediction(uint32_t pc)
 {
-  
+
   // Make a prediction based on the bpType
   switch (bpType) {
   case STATIC:
     return TAKEN;
     
   case GSHARE:
-    if ((global_table[(pc ^ global_history) & global_mask] & counter_mask) == ST||
-	(global_table[(pc ^ global_history) & global_mask] & counter_mask) == WT){	
+    if ((global_table[(pc ^ global_history) & global_mask] ) == ST||
+	(global_table[(pc ^ global_history) & global_mask] ) == WT){	
       return TAKEN;
     }
     else{
@@ -126,10 +128,13 @@ make_prediction(uint32_t pc)
   case TOURNAMENT:
 
     //ST and WT mean Global, SN and WN mean Local
+    //printf("Choice: %d\n", choice_table[(global_history) & global_mask]);
+
     if (choice_table[(global_history) & global_mask] == ST ||
 	choice_table[(global_history) & global_mask] == WT){
-      if ((global_table[(global_history) & global_mask] & counter_mask) == ST||
-	  (global_table[(global_history) & global_mask] & counter_mask) == WT){	
+
+      if ((global_table[(global_history) & global_mask]) == ST||
+	  (global_table[(global_history) & global_mask]) == WT){	
 	return TAKEN;
       }
       else{
@@ -137,7 +142,7 @@ make_prediction(uint32_t pc)
       }            
     }
     else{
-      
+
       if (local_pattern_table[local_history_table[pc && pc_mask] & local_mask] == ST ||
 	  local_pattern_table[local_history_table[pc && pc_mask] & local_mask] == WT){
 	return TAKEN;
@@ -163,7 +168,6 @@ make_prediction(uint32_t pc)
 void
 train_predictor(uint32_t pc, uint8_t outcome)
 {
-  
   //booleans for tournament predictor
   int global_prediction;
   int local_prediction;
@@ -188,7 +192,7 @@ train_predictor(uint32_t pc, uint8_t outcome)
       }
     }
 
-    global_history = global_history << 1 + outcome;
+    global_history = (global_history << 1) + outcome;
     break;
 
   case TOURNAMENT:
@@ -196,24 +200,25 @@ train_predictor(uint32_t pc, uint8_t outcome)
     //GLOBAL
     //if taken
     if (outcome == 1){
-      if (global_table[(global_history) & global_mask] != ST){
-	global_table[(global_history) & global_mask] ++; //Move 0->1->2->3
+      if (global_table[global_history & global_mask] != ST){
+	global_table[global_history & global_mask] ++; //Move 0->1->2->3
       }
     }
     //if not taken
     else{
-      if (global_table[(global_history) & global_mask] != SN){
-	global_table[(global_history) & global_mask] --; //Move 3->2->1->0
+      if (global_table[global_history & global_mask] != SN){
+	global_table[global_history & global_mask] --; //Move 3->2->1->0
       }
     }
     //check the correctness
-    if ((global_table[global_history & global_mask] & counter_mask) == ST||
-	(global_table[global_history & global_mask] & counter_mask) == WT){	
+    if ((global_table[global_history & global_mask]) == ST||
+	(global_table[global_history & global_mask]) == WT){	
       global_prediction = TAKEN;
     }
     else{
       global_prediction = NOTTAKEN;
     }
+
     global_correctness = (global_prediction == outcome);
 
 
@@ -231,36 +236,43 @@ train_predictor(uint32_t pc, uint8_t outcome)
 	local_pattern_table[local_history_reg & local_mask] --;
       }
     }
+
     //check the correctness
-    if ((local_pattern_table[local_history_reg & local_mask] & counter_mask) == ST||
-	(local_pattern_table[local_history_reg & local_mask] & counter_mask) == WT){	
+    if ((local_pattern_table[local_history_reg & local_mask]) == ST||
+	(local_pattern_table[local_history_reg & local_mask]) == WT){	
       local_prediction = TAKEN;
     }
     else{
       local_prediction = NOTTAKEN;
     }
     local_correctness = (local_prediction == outcome);
+
+    
+    
     
     //CHOICE
     //Overloading the counter definition for choice
     //TAKEN means using global, NOTTAKEN means using local
     //Move towards global predictor
     if (global_correctness == true && local_correctness == false){
-      if (choice_table[(global_history) & global_mask] != ST){
-	choice_table[(global_history) & global_mask] ++; //Move 0->1->2->3
+      if (choice_table[global_history & global_mask] != ST){
+	choice_table[global_history & global_mask] ++; //Move 0->1->2->3
       }
     }
 
     //Move towards local predictor
     else if (global_correctness == false && local_correctness == true){
-      if (choice_table[(global_history) & global_mask] != SN){
-	choice_table[(global_history) & global_mask] --; //Move 3->2->1->0
+      if (choice_table[global_history & global_mask] != SN){
+	choice_table[global_history & global_mask] --; //Move 3->2->1->0
       }
     }
+
     
     //finish update to history
-    global_history = global_history << 1 + outcome;
-    local_history_table[pc && pc_mask] = local_history_table[pc && pc_mask] << 1 + outcome;
+    global_history = (global_history << 1) + outcome;
+    local_history_table[pc && pc_mask] = (local_history_table[pc && pc_mask] << 1) + outcome;
+    
+    break;
     
   case CUSTOM:
 
