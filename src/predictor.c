@@ -54,6 +54,11 @@ init_predictor()
   gshare_pht = calloc (1 << ghistoryBits, sizeof(uint8_t)); 
   gshare_mask = (1 << ghistoryBits) - 1; //set the last ghistoryBits to be 1s
 
+  int i;
+  for (i = 0; i < (1 << ghistoryBits); ++i){
+    gshare_pht[i] = WN; //initialize all elements to Weakly Not Taken
+  }
+  
 
 }
 
@@ -70,8 +75,8 @@ make_prediction(uint32_t pc)
   case STATIC:
     return TAKEN;
   case GSHARE:
-    if ((gshare_pht[(pc ^ global_history) & gshare_mask] & extract2_mask) == 1 ||
-	(gshare_pht[(pc ^ global_history) & gshare_mask] & extract2_mask) == 2){	
+    if ((gshare_pht[(pc ^ global_history) & gshare_mask] & extract2_mask) == ST||
+	(gshare_pht[(pc ^ global_history) & gshare_mask] & extract2_mask) == WT){	
       return TAKEN;
     }
     else{
@@ -100,14 +105,14 @@ train_predictor(uint32_t pc, uint8_t outcome)
   //gshare
   //if taken
   if (outcome == 1){
-    if (gshare_pht[(pc ^ global_history) & gshare_mask] != 2){
+    if (gshare_pht[(pc ^ global_history) & gshare_mask] != ST){
       gshare_pht[(pc ^ global_history) & gshare_mask] ++;
     }
   }
 
   //if not taken
-  if (outcome == 0){
-    if (gshare_pht[(pc ^ global_history) & gshare_mask] != 3){
+  else{
+    if (gshare_pht[(pc ^ global_history) & gshare_mask] != SN){
       gshare_pht[(pc ^ global_history) & gshare_mask] --;
     }
   }
