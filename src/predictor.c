@@ -35,13 +35,9 @@ int verbose;
 //------------------------------------//
 
 uint32_t global_history = 0;
-uint8_t gshare_pht[0x00002000]; // For Gshare Predictor
-uint32_t mask13 = 0x00001FFF;
-uint32_t mask2 = 0x00000003;
-
-//
-//TODO: Add your own Branch Predictor data structures here
-//
+uint8_t* gshare_pht;
+uint32_t gshare_mask; // extract the last ghistorybits
+uint32_t extract2_mask = 0x00000003; //extract the last 2 bits
 
 
 //------------------------------------//
@@ -53,12 +49,12 @@ uint32_t mask2 = 0x00000003;
 void
 init_predictor()
 {
-  
+
   //Gshare
-  
-  //
-  //TODO: Initialize Branch Predictor Data Structures
-  //
+  gshare_pht = calloc (1 << ghistoryBits, sizeof(uint8_t)); 
+  gshare_mask = (1 << ghistoryBits) - 1; //set the last ghistoryBits to be 1s
+
+
 }
 
 // Make a prediction for conditional branch instruction at PC 'pc'
@@ -68,19 +64,14 @@ init_predictor()
 uint8_t
 make_prediction(uint32_t pc)
 {
-  //
-  //TODO: Implement prediction scheme
-  //
   
   // Make a prediction based on the bpType
   switch (bpType) {
   case STATIC:
     return TAKEN;
   case GSHARE:
-      
-    if ((gshare_pht[(pc ^ global_history) & mask13] & mask2) == 1 ||
-	(gshare_pht[(pc ^ global_history) & mask13] & mask2) == 2){
-	
+    if ((gshare_pht[(pc ^ global_history) & gshare_mask] & extract2_mask) == 1 ||
+	(gshare_pht[(pc ^ global_history) & gshare_mask] & extract2_mask) == 2){	
       return TAKEN;
     }
     else{
@@ -109,18 +100,17 @@ train_predictor(uint32_t pc, uint8_t outcome)
   //gshare
   //if taken
   if (outcome == 1){
-    if (gshare_pht[(pc ^ global_history) & mask13] != 2){
-      gshare_pht[(pc ^ global_history) & mask13] ++;
+    if (gshare_pht[(pc ^ global_history) & gshare_mask] != 2){
+      gshare_pht[(pc ^ global_history) & gshare_mask] ++;
     }
   }
 
   //if not taken
   if (outcome == 0){
-    if (gshare_pht[(pc ^ global_history) & mask13] != 3){
-      gshare_pht[(pc ^ global_history) & mask13] --;
+    if (gshare_pht[(pc ^ global_history) & gshare_mask] != 3){
+      gshare_pht[(pc ^ global_history) & gshare_mask] --;
     }
   }
-
 
   global_history = global_history << 1 + outcome;
   //
