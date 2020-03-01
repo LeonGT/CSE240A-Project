@@ -130,8 +130,6 @@ make_prediction(uint32_t pc)
   case TOURNAMENT:
 
     //ST and WT mean Global, SN and WN mean Local
-    //printf("Choice: %d\n", choice_table[(global_history) & global_mask]);
-
     if (choice_table[(global_history) & global_mask] == ST ||
 	choice_table[(global_history) & global_mask] == WT){
 
@@ -225,6 +223,7 @@ train_predictor(uint32_t pc, uint8_t outcome)
     }
     local_correctness = (local_prediction == outcome);
 
+    //Move towards global predictor
     if (global_correctness == true && local_correctness == false){
       if (choice_table[global_history & global_mask] != ST){
 	choice_table[global_history & global_mask] ++; //Move 0->1->2->3
@@ -268,7 +267,7 @@ train_predictor(uint32_t pc, uint8_t outcome)
       }
     }
     
-    //finish update to history
+    //UPDATE HISTORY
     global_history = (global_history << 1) + outcome;
     local_history_table[pc & pc_mask] = (local_history_table[pc & pc_mask] << 1) + outcome;
     
@@ -276,6 +275,7 @@ train_predictor(uint32_t pc, uint8_t outcome)
     
   case CUSTOM:
 
+    break;
     
   default:
     break;

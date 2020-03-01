@@ -1,0 +1,11 @@
+For the custom branch predictor:
+
+Improvement 1: Eliminate Negative Aliasing/Interference
+  1) XOR the PC with history
+  2) Hash function
+  3) Dynamic Resizing (Cache) //83% of the branchesappear within the last 64 branches fetched
+
+Improvement 2: Replacement to Saturating Counter
+  1) Saturating Counter in the textbook
+  2) Other Automaton that has unbalanced difficulty in T/NT (WN--(T)-->ST, WT--(N)-->WN)
+
