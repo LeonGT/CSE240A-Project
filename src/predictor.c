@@ -49,14 +49,26 @@ uint32_t extract2_mask = 0x00000003; //extract the last 2 bits
 void
 init_predictor()
 {
+  switch (bpType) {
+  case GSHARE:
 
-  //Gshare
-  gshare_pht = calloc (1 << ghistoryBits, sizeof(uint8_t)); 
-  gshare_mask = (1 << ghistoryBits) - 1; //set the last ghistoryBits to be 1s
+    //Gshare
+    gshare_pht = calloc (1 << ghistoryBits, sizeof(uint8_t)); 
+    gshare_mask = (1 << ghistoryBits) - 1; //set the last ghistoryBits to be 1s
 
-  int i;
-  for (i = 0; i < (1 << ghistoryBits); ++i){
-    gshare_pht[i] = WN; //initialize all elements to Weakly Not Taken
+    int i;
+    for (i = 0; i < (1 << ghistoryBits); ++i){
+      gshare_pht[i] = WN; //initialize all elements to Weakly Not Taken
+    }
+    break;
+  case TOURNAMENT:
+
+    
+  case CUSTOM:
+
+    
+  default:
+    break;
   }
   
 
@@ -74,6 +86,7 @@ make_prediction(uint32_t pc)
   switch (bpType) {
   case STATIC:
     return TAKEN;
+    
   case GSHARE:
     if ((gshare_pht[(pc ^ global_history) & gshare_mask] & extract2_mask) == ST||
 	(gshare_pht[(pc ^ global_history) & gshare_mask] & extract2_mask) == WT){	
@@ -101,25 +114,36 @@ void
 train_predictor(uint32_t pc, uint8_t outcome)
 {
 
-  //printf("Train: %d; Outcome %d\n", gshare_pht[(pc ^ global_history) & mask13], outcome);
-  //gshare
-  //if taken
-  if (outcome == 1){
-    if (gshare_pht[(pc ^ global_history) & gshare_mask] != ST){
-      gshare_pht[(pc ^ global_history) & gshare_mask] ++;
-    }
-  }
+  switch (bpType) {
+  case GSHARE:
 
-  //if not taken
-  else{
-    if (gshare_pht[(pc ^ global_history) & gshare_mask] != SN){
-      gshare_pht[(pc ^ global_history) & gshare_mask] --;
+    //if taken
+    if (outcome == 1){
+      if (gshare_pht[(pc ^ global_history) & gshare_mask] != ST){
+	gshare_pht[(pc ^ global_history) & gshare_mask] ++; //Move 0->1->2->3
+      }
     }
-  }
 
-  global_history = global_history << 1 + outcome;
-  //
-  //TODO: Implement Predictor training
-  //
+    //if not taken
+    else{
+      if (gshare_pht[(pc ^ global_history) & gshare_mask] != SN){
+	gshare_pht[(pc ^ global_history) & gshare_mask] --; //Move 3->2->1->0
+      }
+    }
+
+    global_history = global_history << 1 + outcome;
+    break;
+
+  case TOURNAMENT:
+
+    
+  case CUSTOM:
+
+    
+  default:
+    break;
+  }
+    
+
 }
 
