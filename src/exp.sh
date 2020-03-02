@@ -15,3 +15,8 @@ do
     echo "Running tournament:9:10:10 on $trace"
     bunzip2 -kc "$trace" | ./predictor --tournament:9:10:10 | sed '$!d'
 done
+for trace in ../traces/*
+do
+    echo "Running custom on $trace"
+    bunzip2 -kc "$trace" | ./predictor --custom | sed '$!d'
+done
