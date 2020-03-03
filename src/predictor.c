@@ -29,7 +29,6 @@ const char *bpName[4] = { "Static", "Gshare",
 int ghistoryBits; // Number of bits used for Global History
 int lhistoryBits; // Number of bits used for Local History
 int pcIndexBits;  // Number of bits used for PC index
-int hpBits;  // Number of bits used for History Pattern
 int bpType;       // Branch Prediction Type
 int verbose;
 
@@ -45,7 +44,15 @@ uint8_t* choice_table;
 uint32_t global_mask; // extract the last ghistorybits
 uint32_t pc_mask; // extract the last pcIndexBits
 uint32_t local_mask; // extract the last lhistorybits
-uint32_t pattern_mask;
+
+
+int lhistorySize;
+int ghistorySize;
+uint64_t* global_table_2;
+uint32_t global_mask_2;
+uint8_t predictor_mask;;
+int ghistoryBits2;
+
 
 //CREDIT: https://gist.github.com/badboy/6267743
 //Robert Jenkins' 32 bit integer hash function
@@ -60,24 +67,6 @@ uint32_t hash(uint32_t a)
     return a;
 }
 
-//hash the pc
-uint32_t hashPC(uint32_t a)
-{
-  return hash(a) & pc_mask;
-}
-
-//hash the global history
-uint32_t hashGH(uint32_t a)
-{
-  return hash(a) & global_mask;
-}
-
-//hash the history pattern
-uint32_t hashHP(uint32_t a)
-{
-  return hash(a & pattern_mask) & local_mask;
-}
-
 
 //------------------------------------//
 //        Predictor Functions         //
@@ -90,15 +79,18 @@ init_predictor()
 {
 
   if(bpType == CUSTOM){
-    ghistoryBits = 9; // Number of bits used for Global History
-    lhistoryBits = 12; // Number of bits used for Local History
-    pcIndexBits = 10;  // Number of bits used for PC index
-    hpBits = 12;
-    pattern_mask = (1 << hpBits) - 1;
+    ghistoryBits = 15; //big impact
+    lhistoryBits = 10; //small impact
+    pcIndexBits = 10; //optimized
+    lhistorySize = 512; //optimized
+    ghistorySize = 512;
+    ghistoryBits2 = 20;
+    global_mask_2 = (1 << ghistoryBits2) - 1;
+    predictor_mask = (1 << 2) - 1;
   }
   
   //initialize global table (common to all)
-  global_history = 1;
+  global_history = 0;
   global_table = calloc (1 << ghistoryBits, sizeof(uint8_t));
   global_mask = (1 << ghistoryBits) - 1; //set the last ghistoryBits to be 1s
   pc_mask = (1 << pcIndexBits) - 1;
@@ -136,19 +128,26 @@ init_predictor()
     
   case CUSTOM:
 
+
+    //initialize global table (common to all)
+    global_table_2 = calloc (1 << ghistorySize, sizeof(uint64_t));
+    for (i = 0; i < (1 << ghistorySize); ++i){
+      global_table_2[i] = WN; //initialize all elements to Weakly Local
+    }
+    
     //initialize choice table
     choice_table = calloc (1 << ghistoryBits, sizeof(uint8_t)); 
     for (i = 0; i < (1 << ghistoryBits); ++i){
       choice_table[i] = WN; //initialize all elements to Weakly Local
     }
 
-    //initialize local history table to 0000000000 (lhistoryBits * 0)
-    local_history_table = calloc (1 << pcIndexBits, sizeof(uint32_t)); 
+    //initialize local history table to 000000000000 (lhistoryBits * 0)
+    local_history_table = calloc (lhistorySize, sizeof(uint32_t)); 
 
     //initialize local pattern table
-    local_pattern_table = calloc (1 << hpBits, sizeof(uint8_t)); 
-    for (i = 0; i < (1 << hpBits); ++i){
-      local_pattern_table[i] = WN; //initialize all elements to Weakly Not Taken
+    local_pattern_table = calloc (1 << lhistoryBits, sizeof(uint8_t)); 
+    for (i = 0; i < (1 << lhistoryBits); ++i){
+      local_pattern_table[i] = WT; //initialize all elements to Weakly Not Taken
     }
 
     break;
@@ -168,6 +167,7 @@ uint8_t
 make_prediction(uint32_t pc)
 {
 
+  int i;
   // Make a prediction based on the bpType
   switch (bpType) {
   case STATIC:
@@ -209,30 +209,51 @@ make_prediction(uint32_t pc)
 
   case CUSTOM:
 
-    //ST and WT mean Global, SN and WN mean Local
-    if (choice_table[hashGH(global_history)] == ST ||
-	choice_table[hashGH(global_history)] == WT){
 
-      if ((global_table[hashGH(global_history)]) == ST||
-	  (global_table[hashGH(global_history)]) == WT){	
-	return TAKEN;
+    //ST and WT mean Global, SN and WN mean Local
+
+    //hit in local
+    if (choice_table[(global_history) & global_mask] == SN ||
+	choice_table[(global_history) & global_mask] == WN){
+
+      for (i = 0; i < lhistorySize; ++i){
+	if (((local_history_table[i] >> lhistoryBits) & pc_mask) == (pc & pc_mask)){
+	  
+	  if (local_pattern_table[local_history_table[i] & local_mask] == ST ||
+	      local_pattern_table[local_history_table[i] & local_mask] == WT){
+	    return TAKEN;
+	  }
+	  else{
+	    return NOTTAKEN;
+	  }
+	}
       }
-      else{
-	return NOTTAKEN;
-      }            
+    }
+
+    //hit in global2
+    for (i = 0; i < ghistorySize; ++i){
+      if (((global_table_2[i] >> 2) & global_mask_2) == (global_history & global_mask_2)){
+	
+	if ((global_table_2[i] & predictor_mask) == ST || (global_table_2[i] & predictor_mask) == WT){
+	  return TAKEN;
+	}
+	else{
+	  return NOTTAKEN;
+	}
+      }
+    }
+
+    //no hit using traditional global
+    if ((global_table[(global_history) & global_mask]) == ST||
+	(global_table[(global_history) & global_mask]) == WT){	
+      return TAKEN;
     }
     else{
-
-      if (local_pattern_table[hashHP(local_history_table[hashPC(pc)])] == ST ||
-	  local_pattern_table[hashHP(local_history_table[hashPC(pc)])] == WT){
-	return TAKEN;
-      }
-      else{
-	return NOTTAKEN;
-      }
-    }
-
+      return NOTTAKEN;
+    }          
+    
   default:
+    return TAKEN;
     break;
   }
 
@@ -253,6 +274,10 @@ train_predictor(uint32_t pc, uint8_t outcome)
   bool global_correctness;
   bool local_correctness;
   uint32_t local_history_reg;
+  int i;
+  int indexSeenGlobal;
+  int indexSeen;
+  int moveTemp;
   
   switch (bpType) {
   case GSHARE:
@@ -260,14 +285,14 @@ train_predictor(uint32_t pc, uint8_t outcome)
     //if taken
     if (outcome == 1){
       if (global_table[(pc ^ global_history) & global_mask] != ST){
-	global_table[(pc ^ global_history) & global_mask] ++; //Move 0->1->2->3
+	global_table[(pc ^ global_history) & global_mask] += 1; //Move 0->1->2->3
       }
     }
 
     //if not taken
     else{
       if (global_table[(pc ^ global_history) & global_mask] != SN){
-	global_table[(pc ^ global_history) & global_mask] --; //Move 3->2->1->0
+	global_table[(pc ^ global_history) & global_mask] -= 1; //Move 3->2->1->0
       }
     }
 
@@ -337,13 +362,13 @@ train_predictor(uint32_t pc, uint8_t outcome)
     //if taken
     if (outcome == 1){
       if (local_pattern_table[local_history_reg & local_mask] != ST){
-	local_pattern_table[local_history_reg & local_mask] ++;
+	local_pattern_table[local_history_reg & local_mask] += 1;
       }
     }
     //if not taken
     else{
       if (local_pattern_table[local_history_reg & local_mask] != SN){
-	local_pattern_table[local_history_reg & local_mask] --;
+	local_pattern_table[local_history_reg & local_mask] -= 1;
       }
     }
     
@@ -359,76 +384,186 @@ train_predictor(uint32_t pc, uint8_t outcome)
     //Overloading the counter definition for choice
     //TAKEN means using global, NOTTAKEN means using local
     //Move towards global predictor
-    
+
     //check the global correctness
-    if ((global_table[hashGH(global_history)]) == ST||
-	(global_table[hashGH(global_history)]) == WT){	
-      global_prediction = TAKEN;
+    //printf("Global History is %d\n", global_history & global_mask_2);
+    //printf("Curre P is %d\n", (global_history & global_mask_2));
+    indexSeenGlobal = -1;
+    for (i = 0; i < ghistorySize; ++i){
+
+      //printf("Table P is %ld in state %ld \n", (global_table_2[i] >> 2) & global_mask_2, global_table_2[i] & predictor_mask);
+      //
+      
+      if (((global_table_2[i] >> 2) & global_mask_2) == (global_history & global_mask_2)){
+	indexSeenGlobal = i;
+	break;	
+      }
+    }
+
+    if (indexSeenGlobal != -1){
+      if (((global_table_2[indexSeenGlobal] & predictor_mask) == ST) || ((global_table_2[indexSeenGlobal] & predictor_mask) == WT)){
+	global_prediction = TAKEN;
+      }
+      else{
+	global_prediction = NOTTAKEN;
+      }
     }
     else{
-      global_prediction = NOTTAKEN;
+        
+      if ((global_table[global_history & global_mask]) == ST||
+	  (global_table[global_history & global_mask]) == WT){	
+
+	global_prediction = TAKEN;
+      }
+      else{
+	global_prediction = NOTTAKEN;
+      }
     }
     global_correctness = (global_prediction == outcome);
  
     //check the local correctness
-    local_history_reg = hashHP(local_history_table[hashPC(pc)]);
-    if ((local_pattern_table[local_history_reg]) == ST||
-	(local_pattern_table[local_history_reg]) == WT){	
-      local_prediction = TAKEN;
+
+    indexSeen = -1;
+    for (i = 0; i < lhistorySize; ++i){
+      //printf("LHT at %d is %d\n", i, local_history_table[i]);
+      if (((local_history_table[i] >> lhistoryBits) & pc_mask) == (pc & pc_mask)){
+	local_history_reg = local_history_table[0] & local_mask;
+	indexSeen = i;
+	break;
+      }
+    }
+
+    if (indexSeen != -1){
+      if ((local_pattern_table[local_history_reg]) == ST||
+	  (local_pattern_table[local_history_reg]) == WT){	
+	local_prediction = TAKEN;
+      }
+      else{
+	local_prediction = NOTTAKEN;
+      }
+      local_correctness = (local_prediction == outcome);
     }
     else{
-      local_prediction = NOTTAKEN;
+      local_correctness = false;
     }
-    local_correctness = (local_prediction == outcome);
-
+    
     //Move towards global predictor
     if (global_correctness == true && local_correctness == false){
-      if (choice_table[hashGH(global_history)] != ST){
-	choice_table[hashGH(global_history)] ++; //Move 0->1->2->3
+      if (choice_table[global_history & global_mask] != ST){
+	choice_table[global_history & global_mask] ++; //Move 0->1->2->3
       }
     }
 
     //Move towards local predictor
     else if (global_correctness == false && local_correctness == true){
-      if (choice_table[hashGH(global_history)] != SN){
-	choice_table[hashGH(global_history)] --; //Move 3->2->1->0
+      if (choice_table[global_history & global_mask] != SN){
+	choice_table[global_history & global_mask] --; //Move 3->2->1->0
       }
     }
 
     
     //GLOBAL
+
+    if (indexSeenGlobal != -1){
+      //printf("Hit\n");
+      moveTemp = global_table_2[indexSeenGlobal];
+
+      for (i = indexSeen - 1; i >= 0; --i){
+	global_table_2[i+1] = global_table_2[i];
+      }
+      global_table_2[0] = moveTemp;
+    }
+    else{
+      //printf("Miss\n");
+      for (i = ghistorySize - 1; i >= 0; --i){
+	global_table_2[i+1] = global_table_2[i];
+      }
+      global_table_2[0] = (global_history << 2) | WN;
+    }
+
+	
     //if taken
     if (outcome == 1){
-      if (global_table[hashGH(global_history)] != ST){
-	global_table[hashGH(global_history)] ++; //Move 0->1->2->3
+      if (global_table[global_history & global_mask] != ST){
+	global_table[global_history & global_mask] ++; //Move 0->1->2->3
       }
     }
     //if not taken
     else{
-      if (global_table[hashGH(global_history)] != SN){
-	global_table[hashGH(global_history)] --; //Move 3->2->1->0
+      if (global_table[global_history & global_mask] != SN){
+	global_table[global_history & global_mask] --; //Move 3->2->1->0
       }
     }
+    
+    
+    //LOCAL
+    //find the pc
+    indexSeen = -1;
+    for (i = 0; i < lhistorySize; ++i){
+      //printf("LHT at %d is %d\n", i, local_history_table[i]);
+      if (((local_history_table[i] >> lhistoryBits) & pc_mask) == (pc & pc_mask)){
+	indexSeen = i;
+	break;
+      }
+    }
+    
+    //move the pc to top
+    if (indexSeen != -1){
+      //printf("Hit\n");
+      moveTemp = local_history_table[indexSeen];
 
-
+      for (i = indexSeen - 1; i >= 0; --i){
+	local_history_table[i+1] = local_history_table[i];
+      }
+      local_history_table[0] = moveTemp;
+    }
+    else{
+      //printf("Miss\n");
+      for (i = lhistorySize- 1; i >= 0; --i){
+	local_history_table[i+1] = local_history_table[i];
+      }
+      local_history_table[0] = pc << lhistoryBits;
+    }
+    
+    local_history_reg = local_history_table[0] & local_mask;
+    
     //LOCAL
     //if taken
     if (outcome == 1){
       if (local_pattern_table[local_history_reg] != ST){
-	local_pattern_table[local_history_reg] ++;
+	local_pattern_table[local_history_reg] += 1;
       }
     }
     //if not taken
     else{
       if (local_pattern_table[local_history_reg] != SN){
-	local_pattern_table[local_history_reg] --;
+	local_pattern_table[local_history_reg] -= 1;
       }
     }
     
     //UPDATE HISTORY
     global_history = (global_history << 1) + outcome;
-    local_history_table[hashPC(pc)] = (local_history_table[hashPC(pc)] << 1) + outcome;
+    local_history_table[0] = (local_history_table[0] & (pc_mask << lhistoryBits)) | (((local_history_table[0] << 1 ) + outcome) & local_mask);
 
+
+    //printf("Outcome is %d\n", outcome);
+
+    //printf("Entry 0 BEFORE %ld in state %ld \n", (global_table_2[0] >> 2) & global_mask_2, global_table_2[0] & predictor_mask);
+    if (outcome == 1){
+      if ((global_table_2[0] & predictor_mask) != ST){
+	global_table_2[0] = (global_table_2[0] & (global_mask_2 << 2)) | ((global_table_2[0] & predictor_mask) + 1);
+      }
+    }
+    
+    //if not taken
+    else{
+      if ((global_table_2[0] & predictor_mask) != SN){
+	global_table_2[0] = (global_table_2[0] & (global_mask_2 << 2)) | ((global_table_2[0] & predictor_mask) - 1);
+      }
+    }
+    //printf("Entry 0 AFTER %ld in state %ld \n", (global_table_2[0] >> 2) & global_mask_2, global_table_2[0] & predictor_mask);
+    
+    
     break;
     
   default:
