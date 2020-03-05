@@ -415,11 +415,11 @@ train_predictor(uint32_t pc, uint8_t outcome)
 	indexSeenGlobal = i;
 	if ((c_global_table[i] & 0x3) == ST ||(c_global_table[i] & 0x3) == WT){
 
-	  printf("Outcome is %d, Global Predicted TAKEN\n", outcome);
+	  //printf("Outcome is %d, Global Predicted TAKEN\n", outcome);
 	  global_prediction = TAKEN;
 	}
 	else{
-	  printf("Outcome is %d, Global Predicted NOTTAKEN\n", outcome);
+	  //printf("Outcome is %d, Global Predicted NOTTAKEN\n", outcome);
 	  global_prediction = NOTTAKEN;
 	}
       }
