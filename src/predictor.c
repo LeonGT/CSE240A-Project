@@ -36,7 +36,7 @@ int verbose;
 //      Predictor Data Structures     //
 //------------------------------------//
 
-uint32_t global_history;
+uint64_t global_history;
 uint8_t* global_table;
 uint32_t* local_history_table;
 uint8_t* local_pattern_table;
@@ -63,13 +63,13 @@ uint64_t c_global_mask;
 //Robert Jenkins' 32 bit integer hash function
 uint32_t hash(uint32_t a)
 {
-    a = (a+0x7ed55d16) + (a<<12);
-    a = (a^0xc761c23c) ^ (a>>19);
-    a = (a+0x165667b1) + (a<<5);
-    a = (a+0xd3a2646c) ^ (a<<9);
-    a = (a+0xfd7046c5) + (a<<3);
-    a = (a^0xb55a4f09) ^ (a>>16);
-    return a;
+  a = (a+0x7ed55d16) + (a<<12);
+  a = (a^0xc761c23c) ^ (a>>19);
+  a = (a+0x165667b1) + (a<<5);
+  a = (a+0xd3a2646c) ^ (a<<9);
+  a = (a+0xfd7046c5) + (a<<3);
+  a = (a^0xb55a4f09) ^ (a>>16);
+  return a;
 }
 
 
@@ -96,8 +96,9 @@ init_predictor()
     c_lhistorySize = 50;
     c_pc_mask = (1 << c_pcBits) - 1;
     c_local_mask = (1 << c_lhistoryBits) - 1;
-    c_ghistoryBits = 20;
+    c_ghistoryBits = 30;
     c_ghistorySize = 512;
+    c_global_mask = (1 << c_ghistoryBits) - 1;
   }
   
   //Initialize global table (common to all)
@@ -162,11 +163,7 @@ init_predictor()
     }
 
     //initialize global table (common to all)
-    c_global_table = calloc (1 << ghistorySize, sizeof(uint64_t));
-    for (i = 0; i < (1 << ghistorySize); ++i){
-      global_table_2[i] = WN; //initialize all elements to Weakly Local
-    }
-
+    c_global_table = calloc (c_ghistorySize, sizeof(uint64_t));
     break;
     
   default:
@@ -224,10 +221,22 @@ make_prediction(uint32_t pc)
 
   case CUSTOM:
 
-        //ST and WT mean Global, SN and WN mean Local
+    //ST and WT mean Global, SN and WN mean Local
     if (choice_table[(global_history) & global_mask] == ST ||
 	choice_table[(global_history) & global_mask] == WT){
 
+      for (i = 0; i < c_ghistorySize; ++i){
+	if ((c_global_table[i] >> 2 & c_global_mask) == (global_history & c_global_mask)){
+	  //printf("Buffer Hit");
+	  if ((c_global_table[i] & 0x3) == ST ||(c_global_table[i] & 0x3) == WT){
+	    return TAKEN;
+	  }
+	  else{
+	    return NOTTAKEN;
+	  }
+	}
+      }
+      
       if ((global_table[(global_history) & global_mask]) == ST||
 	  (global_table[(global_history) & global_mask]) == WT){	
 	return TAKEN;
@@ -240,18 +249,18 @@ make_prediction(uint32_t pc)
 
       //hit in buffer.
       /*
-      for (i = 0; i < c_lhistorySize; ++i){
+	for (i = 0; i < c_lhistorySize; ++i){
 	if (((c_local_history_table[i] >> c_lhistoryBits) & c_pc_mask) == (pc & c_pc_mask)){
 	  
-	  if (c_local_pattern_table[c_local_history_table[i] & c_local_mask] == ST ||
-	      c_local_pattern_table[c_local_history_table[i] & c_local_mask] == WT){
-	    return TAKEN;
-	  }
-	  else{
-	    return NOTTAKEN;
-	  }
+	if (c_local_pattern_table[c_local_history_table[i] & c_local_mask] == ST ||
+	c_local_pattern_table[c_local_history_table[i] & c_local_mask] == WT){
+	return TAKEN;
 	}
-      }
+	else{
+	return NOTTAKEN;
+	}
+	}
+	}
 	
       */
       if (local_pattern_table[local_history_table[pc & pc_mask] & local_mask] == ST ||
@@ -398,6 +407,24 @@ train_predictor(uint32_t pc, uint8_t outcome)
     //Move towards global predictor
     
     //check the global correctness
+
+    indexSeenGlobal = -1;
+    for (i = 0; i < c_ghistorySize; ++i){
+      if ((c_global_table[i] >> 2 & c_global_mask) == (global_history & c_global_mask)){
+	
+	indexSeenGlobal = i;
+	if ((c_global_table[i] & 0x3) == ST ||(c_global_table[i] & 0x3) == WT){
+
+	  printf("Outcome is %d, Global Predicted TAKEN\n", outcome);
+	  global_prediction = TAKEN;
+	}
+	else{
+	  printf("Outcome is %d, Global Predicted NOTTAKEN\n", outcome);
+	  global_prediction = NOTTAKEN;
+	}
+      }
+    }
+    
     if ((global_table[global_history & global_mask]) == ST||
 	(global_table[global_history & global_mask]) == WT){	
       global_prediction = TAKEN;
@@ -405,25 +432,26 @@ train_predictor(uint32_t pc, uint8_t outcome)
     else{
       global_prediction = NOTTAKEN;
     }
+
     global_correctness = (global_prediction == outcome);
  
     //check the local correctness
     indexSeen = -1;
 
     /*
-    for (i = 0; i < c_lhistorySize; ++i){
+      for (i = 0; i < c_lhistorySize; ++i){
       if (((c_local_history_table[i] >> c_lhistoryBits) & c_pc_mask) == (pc & c_pc_mask)){
 
-	indexSeen = i;
-	if (c_local_pattern_table[c_local_history_table[i] & c_local_mask] == ST ||
-	    c_local_pattern_table[c_local_history_table[i] & c_local_mask] == WT){
-	  local_prediction = TAKEN;
-	}
-	else{
-	  local_prediction = NOTTAKEN;
-	}
+      indexSeen = i;
+      if (c_local_pattern_table[c_local_history_table[i] & c_local_mask] == ST ||
+      c_local_pattern_table[c_local_history_table[i] & c_local_mask] == WT){
+      local_prediction = TAKEN;
       }
-    }
+      else{
+      local_prediction = NOTTAKEN;
+      }
+      }
+      }
     */
     
     //local buffer falls through
@@ -470,6 +498,39 @@ train_predictor(uint32_t pc, uint8_t outcome)
     }
 
 
+    //update global buffer
+    if (indexSeenGlobal != -1){
+      moveTemp = c_global_table[indexSeenGlobal];
+      
+      for (i = indexSeen - 1; i >= 0; --i){
+	c_global_table[i+1] = c_global_table[i];
+      }
+      c_global_table[0] = moveTemp;
+    }
+    else{
+      for (i = c_ghistorySize - 2; i >= 0; --i){
+	c_global_table[i+1] = c_global_table[i];
+      }
+      c_global_table[0] = (global_history << 2) | (global_table[global_history & global_mask] & 0x3);
+    }
+	
+    //if taken
+    if (outcome == 1){
+      if ((c_global_table[0] & 0x3) != ST){
+	c_global_table[0] = (c_global_table[0] & (c_global_mask << 2)) |
+	  ((c_global_table[0] & 0x3) + 1);
+      }
+    }
+    //if not taken
+    else{
+      if (global_table[global_history & global_mask] != SN){
+	c_global_table[0] = (c_global_table[0] & (c_global_mask << 2)) |
+	  ((c_global_table[0] & 0x3) - 1);
+      }
+    }
+
+
+
     //LOCAL
     //if taken
     if (outcome == 1){
@@ -484,6 +545,7 @@ train_predictor(uint32_t pc, uint8_t outcome)
       }
     }
 
+    /*
     //move the pc to top
     if (indexSeen != -1){
 
@@ -519,12 +581,12 @@ train_predictor(uint32_t pc, uint8_t outcome)
 	c_local_pattern_table[local_history_reg] -= 1;
       }
     }
-        
+    */
     
     //UPDATE HISTORY
     global_history = (global_history << 1) + outcome;
     local_history_table[pc & pc_mask] = (local_history_table[pc & pc_mask] << 1) + outcome;
-    c_local_history_table[0] = (c_local_history_table[0] & (c_pc_mask << c_lhistoryBits)) | ((c_local_history_table[0] & 0x3) - 1);
+    //c_local_history_table[0] = (c_local_history_table[0] & (c_pc_mask << c_lhistoryBits)) | ((c_local_history_table[0] & 0x3) - 1);
 
     
     
